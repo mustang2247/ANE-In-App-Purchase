@@ -17,170 +17,155 @@
 //////////////////////////////////////////////////////////////////////////////////////
 
 #import "AirInAppPurchase.h"
+#import "JSONKit.h"
 
-FREContext AirInAppCtx = nil;
+#define DEFINE_ANE_FUNCTION(fn) FREObject fn(FREContext context, void* functionData, uint32_t argc, FREObject argv[])
+#define MAP_FUNCTION(fn, data) { (const uint8_t*)(#fn), (data), &(fn) }
 
-void *AirInAppRefToSelf;
+#define INIT_SUCCESSFUL (const uint8_t*)"INIT_SUCCESSFUL"
+#define INIT_ERROR (const uint8_t*)"INIT_ERROR"
 
-#define DEFINE_ANE_FUNCTION(fn) FREObject (fn)(FREContext context, void* functionData, uint32_t argc, FREObject argv[])
+#define PURCHASE_SUCCESSFUL (const uint8_t*)"PURCHASE_SUCCESSFUL"
+#define PURCHASE_ERROR (const uint8_t*)"PURCHASE_ERROR"
 
+#define CONSUME_SUCCESSFUL (const uint8_t*)"CONSUME_SUCCESSFUL"
+#define CONSUME_ERROR (const uint8_t*)"CONSUME_ERROR"
+
+#define PRODUCT_INFO_RECEIVED (const uint8_t*)"PRODUCT_INFO_RECEIVED"
+#define PRODUCT_INFO_ERROR (const uint8_t*)"PRODUCT_INFO_ERROR"
+
+#define RESTORE_INFO_RECEIVED (const uint8_t*)"RESTORE_INFO_RECEIVED"
+#define RESTORE_INFO_ERROR (const uint8_t*)"RESTORE_INFO_ERROR"
+
+@interface AirInAppPurchase () {
+    
+}
+
+@property (nonatomic, assign) FREContext context;
+
+@end
 
 @implementation AirInAppPurchase
 
-- (id) init
-{
-    self = [super init];
-    if (self)
-    {
-        AirInAppRefToSelf = self;
+@synthesize context;
+
+- (id)initWithContext:(FREContext)extensionContext {
+    
+    if (self = [super init]) {
+        
+        self.context = extensionContext;
+        [[SKPaymentQueue defaultQueue] addTransactionObserver:self];
     }
+    
     return self;
 }
 
--(void)dealloc
-{
+- (void)dealloc {
+    
+    self.context = nil;
     [[SKPaymentQueue defaultQueue] removeTransactionObserver:self];
-    AirInAppRefToSelf = nil;
+    
     [super dealloc];
 }
 
-- (BOOL) canMakePayment
-{
-    return [SKPaymentQueue canMakePayments];
-}
+#pragma mark - getProductsInfo
 
-- (void) registerObserver
-{
-    [[SKPaymentQueue defaultQueue] addTransactionObserver:self];
-}
-
-
-//////////////////////////////////////////////////////////////////////////////////////
-// PRODUCT INFO
-//////////////////////////////////////////////////////////////////////////////////////
-
-// get products info
-- (void) sendRequest:(SKRequest*)request AndContext:(FREContext*)ctx
-{
-    request.delegate = self;
-    [request start];   
-}
-
-// on product info received
-- (void)productsRequest:(SKProductsRequest *)request didReceiveResponse:(SKProductsResponse *)response
-{
+- (void)productsRequest:(SKProductsRequest*)request didReceiveResponse:(SKProductsResponse*)response {
     
-    NSNumberFormatter *numberFormatter = [[NSNumberFormatter alloc] init];
+    NSNumberFormatter* numberFormatter = [[NSNumberFormatter alloc] init];
     [numberFormatter setNumberStyle:NSNumberFormatterCurrencyStyle];
     
-    NSMutableDictionary *dictionary = [[NSMutableDictionary alloc] init];
-    NSMutableDictionary *productElement = [[NSMutableDictionary alloc] init];
+    NSMutableDictionary* dictionary = [NSMutableDictionary dictionary];
+    NSMutableDictionary* productElement = [NSMutableDictionary dictionary];
     
-    for (SKProduct* product in [response products])
-    {
-        NSMutableDictionary *details = [[NSMutableDictionary alloc] init];
+    NSArray* products = response.products;
+    
+    for (SKProduct* product in products) {
+        
+        NSMutableDictionary* details = [NSMutableDictionary dictionary];
+        
         [numberFormatter setLocale:product.priceLocale];
-        [details setValue: [numberFormatter stringFromNumber:product.price] forKey:@"price"];
-        [details setValue: product.localizedTitle forKey:@"title"];
-        [details setValue: product.localizedDescription forKey:@"description"];
-        [details setValue: product.productIdentifier forKey:@"productId"];
-        [details setValue: [numberFormatter currencyCode] forKey:@"price_currency_code"];
-        [details setValue: [numberFormatter currencySymbol] forKey:@"price_currency_symbol"];
-        [details setValue: product.price forKey:@"value"];
+        
+        [details setValue:[numberFormatter stringFromNumber:product.price] forKey:@"price"];
+        [details setValue:product.localizedTitle forKey:@"title"];
+        [details setValue:product.localizedDescription forKey:@"description"];
+        [details setValue:product.productIdentifier forKey:@"productId"];
+        [details setValue:[numberFormatter currencyCode] forKey:@"price_currency_code"];
+        [details setValue:[numberFormatter currencySymbol] forKey:@"price_currency_symbol"];
+        [details setValue:product.price forKey:@"value"];
+        
         [productElement setObject:details forKey:product.productIdentifier];
     }
     
     [dictionary setObject:productElement forKey:@"details"];
     
+    NSString* jsonString = dictionary.JSONString;
     
-    NSString* jsonDictionary = [dictionary JSONString];
-    
-    FREDispatchStatusEventAsync(AirInAppCtx ,(uint8_t*) "PRODUCT_INFO_RECEIVED", (uint8_t*) [jsonDictionary UTF8String] );
-    
-    if ([response invalidProductIdentifiers] != nil && [[response invalidProductIdentifiers] count] > 0)
-    {
-        NSString* jsonArray = [[response invalidProductIdentifiers] JSONString];
-        
-        FREDispatchStatusEventAsync(AirInAppCtx ,(uint8_t*) "PRODUCT_INFO_ERROR", (uint8_t*) [jsonArray UTF8String] );
-        
-    }
+    if (jsonString != nil)
+        FREDispatchStatusEventAsync(context, PRODUCT_INFO_RECEIVED, (const uint8_t*)jsonString.UTF8String);
+    else
+        FREDispatchStatusEventAsync(context, PRODUCT_INFO_ERROR, (const uint8_t*)"json parse error");
 }
 
-// on product info finish
-- (void)requestDidFinish:(SKRequest *)request
-{
-    FREDispatchStatusEventAsync(AirInAppCtx ,(uint8_t*) "DEBUG", (uint8_t*) [@"requestDidFinish" UTF8String] );
+- (void)requestDidFinish:(SKRequest*)request {
+    FREDispatchStatusEventAsync(context ,(uint8_t*) "DEBUG", (uint8_t*) [@"requestDidFinish" UTF8String] );
 }
 
-// on product info error
-- (void)request:(SKRequest *)request didFailWithError:(NSError *)error
-{
-    FREDispatchStatusEventAsync(AirInAppCtx ,(uint8_t*) "DEBUG", (uint8_t*) [@"requestDidFailWithError" UTF8String] );
+- (void)request:(SKRequest *)request didFailWithError:(NSError*)error {
+    FREDispatchStatusEventAsync(context ,(uint8_t*) "DEBUG", (uint8_t*) [@"requestDidFailWithError" UTF8String] );
 }
 
+#pragma mark - makePurchase
 
-//////////////////////////////////////////////////////////////////////////////////////
-// PURCHASE PRODUCT
-//////////////////////////////////////////////////////////////////////////////////////
-
-// complete a transaction (item has been purchased, need to check the receipt)
-- (void) completeTransaction:(SKPaymentTransaction*)transaction
-{
-    NSMutableDictionary *data;
-
-    // purchase done
-    // dispatch event
-    data = [[NSMutableDictionary alloc] init];
-    [data setValue:[[transaction payment] productIdentifier] forKey:@"productId"];
+- (void)completeTransaction:(SKPaymentTransaction*)transaction {
     
+    NSMutableDictionary* data = [NSMutableDictionary dictionary];
+    
+    SKPayment* payment = transaction.payment;
     NSString* receiptString = [[[NSString alloc] initWithData:transaction.transactionReceipt encoding:NSUTF8StringEncoding] autorelease];
-    [data setValue:receiptString forKey:@"receipt"];
-    [data setValue:@"AppStore"   forKey:@"receiptType"];
     
-    FREDispatchStatusEventAsync(AirInAppCtx, (uint8_t*)"PURCHASE_SUCCESSFUL", (uint8_t*)[[data JSONString] UTF8String]); 
+    [data setValue:payment.productIdentifier forKey:@"productId"];
+    [data setValue:receiptString forKey:@"receipt"];
+    [data setValue:@"AppStore" forKey:@"receiptType"];
+    
+    NSString* jsonString = data.JSONString;
+    
+    FREDispatchStatusEventAsync(context, PURCHASE_SUCCESSFUL, (const uint8_t*)jsonString.UTF8String);
 }
 
-// transaction failed, remove the transaction from the queue.
-- (void) failedTransaction:(SKPaymentTransaction*)transaction
-{
-    // purchase failed
-    NSMutableDictionary *data;
+- (void)failedTransaction:(SKPaymentTransaction*)transaction {
+    
+    NSMutableDictionary* data = [NSMutableDictionary dictionary];
 
-    [[transaction payment] productIdentifier];
-    [[transaction error] code];
+    SKPayment* payment = transaction.payment;
+    NSError* error = transaction.error;
     
-    data = [[NSMutableDictionary alloc] init];
-    [data setValue:[NSNumber numberWithInteger:[[transaction error] code]]  forKey:@"code"];
-    [data setValue:[[transaction error] localizedFailureReason] forKey:@"FailureReason"];
-    [data setValue:[[transaction error] localizedDescription] forKey:@"FailureDescription"];
-    [data setValue:[[transaction error] localizedRecoverySuggestion] forKey:@"RecoverySuggestion"];
+    [data setValue:[NSNumber numberWithInteger:error.code] forKey:@"code"];
+    [data setValue:[error localizedFailureReason] forKey:@"FailureReason"];
+    [data setValue:[error localizedDescription] forKey:@"FailureDescription"];
+    [data setValue:[error localizedRecoverySuggestion] forKey:@"RecoverySuggestion"];
     
-    NSString *error = transaction.error.code == SKErrorPaymentCancelled ? @"RESULT_USER_CANCELED" : [data JSONString];
+    NSString* jsonString = error.code == SKErrorPaymentCancelled ? @"RESULT_USER_CANCELED" : data.JSONString;
     
-    // conclude the transaction
     [[SKPaymentQueue defaultQueue] finishTransaction:transaction];
     
-    // dispatch event
-    FREDispatchStatusEventAsync(AirInAppCtx, (uint8_t*)"PURCHASE_ERROR", (uint8_t*) [error UTF8String]);
-    
+    FREDispatchStatusEventAsync(context, PURCHASE_ERROR, (const uint8_t*)jsonString.UTF8String);
 }
 
-// transaction is being purchasing, logging the info.
-- (void) purchasingTransaction:(SKPaymentTransaction*)transaction
-{
+- (void)purchasingTransaction:(SKPaymentTransaction*)transaction {
+    
     // purchasing transaction
     // dispatch event
-    FREDispatchStatusEventAsync(AirInAppCtx, (uint8_t*)"PURCHASING", (uint8_t*)             
+    FREDispatchStatusEventAsync(context, (uint8_t*)"PURCHASING", (uint8_t*)
                                 [[[transaction payment] productIdentifier] UTF8String]
                                 ); 
 }
 
-// transaction restored, remove the transaction from the queue.
-- (void) restoreTransaction:(SKPaymentTransaction*)transaction
-{
+- (void)restoreTransaction:(SKPaymentTransaction*)transaction {
+    
     // transaction restored
     // dispatch event
-    FREDispatchStatusEventAsync(AirInAppCtx, (uint8_t*)"TRANSACTION_RESTORED", (uint8_t*)             
+    FREDispatchStatusEventAsync(context, (uint8_t*)"TRANSACTION_RESTORED", (uint8_t*)
                                 [[[transaction error] localizedDescription] UTF8String]
                                 ); 
     
@@ -189,194 +174,165 @@ void *AirInAppRefToSelf;
     [[SKPaymentQueue defaultQueue] finishTransaction:transaction];
 }
 
-
-// list of transactions has been updated.
-- (void)paymentQueue:(SKPaymentQueue *)queue updatedTransactions:(NSArray *)transactions
-{
+- (void)paymentQueue:(SKPaymentQueue*)queue updatedTransactions:(NSArray*)transactions {
+    
     NSUInteger nbTransaction = [transactions count];
     NSString* pendingTransactionInformation = [NSString stringWithFormat:@"pending transaction - %@", [NSNumber numberWithUnsignedInteger:nbTransaction]];
-    FREDispatchStatusEventAsync(AirInAppCtx, (uint8_t*)"UPDATED_TRANSACTIONS", (uint8_t*) [pendingTransactionInformation UTF8String]  ); 
+    FREDispatchStatusEventAsync(context, (uint8_t*)"UPDATED_TRANSACTIONS", (uint8_t*) [pendingTransactionInformation UTF8String]  );
     
-    for ( SKPaymentTransaction* transaction in transactions)
-    {
+    for (SKPaymentTransaction* transaction in transactions) {
+        
         switch (transaction.transactionState) {
-            case SKPaymentTransactionStatePurchased:
-                [self completeTransaction:transaction];
-                break;
-            case SKPaymentTransactionStateFailed:
-                [self failedTransaction:transaction];
-                break;
+                
             case SKPaymentTransactionStatePurchasing:
                 [self purchasingTransaction:transaction];
                 break;
+                
+            case SKPaymentTransactionStatePurchased:
+                [self completeTransaction:transaction];
+                break;
+                
+            case SKPaymentTransactionStateFailed:
+                [self failedTransaction:transaction];
+                break;
+                
             case SKPaymentTransactionStateRestored:
                 [self restoreTransaction:transaction];
                 break;
+                
+            case SKPaymentTransactionStateDeferred:
+                break;
+                
             default:
-                FREDispatchStatusEventAsync(AirInAppCtx, (uint8_t*)"PURCHASE_UNKNOWN", (uint8_t*) [@"Unknown Reason" UTF8String]);
+                FREDispatchStatusEventAsync(context, (uint8_t*)"PURCHASE_UNKNOWN", (uint8_t*) [@"Unknown Reason" UTF8String]);
                 break;
         }
     }
 }
 
-// restoring transaction is done.
-- (void)paymentQueueRestoreCompletedTransactionsFinished:(SKPaymentQueue *)queue
-{
-    FREDispatchStatusEventAsync(AirInAppCtx, (uint8_t*)"DEBUG", (uint8_t*) [@"restoreCompletedTransactions" UTF8String] ); 
+- (void)paymentQueueRestoreCompletedTransactionsFinished:(SKPaymentQueue*)queue {
+    FREDispatchStatusEventAsync(context, (uint8_t*)"DEBUG", (uint8_t*) [@"restoreCompletedTransactions" UTF8String] );
 }
 
-// restoring transaction failed.
-- (void)paymentQueue:(SKPaymentQueue *)queue restoreCompletedTransactionsFailedWithError:(NSError *)error
-{
-    FREDispatchStatusEventAsync(AirInAppCtx, (uint8_t*)"DEBUG", (uint8_t*) [@"restoreFailed" UTF8String] ); 
+- (void)paymentQueue:(SKPaymentQueue*)queue restoreCompletedTransactionsFailedWithError:(NSError*)error {
+    FREDispatchStatusEventAsync(context, (uint8_t*)"DEBUG", (uint8_t*) [@"restoreFailed" UTF8String] );
 }
 
-// transaction has been removed.
-- (void)paymentQueue:(SKPaymentQueue *)queue removedTransactions:(NSArray *)transactions
-{
-    FREDispatchStatusEventAsync(AirInAppCtx, (uint8_t*)"DEBUG", (uint8_t*) [@"removeTransaction" UTF8String] ); 
+- (void)paymentQueue:(SKPaymentQueue*)queue removedTransactions:(NSArray *)transactions {
+    FREDispatchStatusEventAsync(context, (uint8_t*)"DEBUG", (uint8_t*) [@"removeTransaction" UTF8String] );
 }
-
 
 @end
 
+#pragma mark - ane helpers
 
-DEFINE_ANE_FUNCTION(AirInAppPurchaseInit)
-{
-    [(AirInAppPurchase*)AirInAppRefToSelf registerObserver];
+NSString* freObjectToNSString(FREObject object) {
+    
+    uint32_t stringLength;
+    const uint8_t* string;
+    
+    NSString* retString = nil;
+    
+    if (FREGetObjectAsUTF8(object, &stringLength, &string) == FRE_OK)
+        retString = [NSString stringWithUTF8String:(char*)string];
+    
+    return retString;
+}
+
+NSSet* freObjectToNSArrayOfNSString(FREObject object) {
+    
+    uint32_t arrayLength;
+    FREGetArrayLength(object, &arrayLength);
+    
+    NSMutableSet* retSet = [NSMutableSet set];
+    
+    for (unsigned int index = 0; index < arrayLength; index++) {
+        
+        FREObject freString;
+        NSString* string = nil;
+        
+        if (FREGetArrayElementAt(object, index, &freString) == FRE_OK) {
+
+            string = freObjectToNSString(freString);
+
+            if (string != nil)
+                [retSet addObject:string];
+        }
+    }
+    
+    return retSet;
+}
+
+#pragma mark - ane interface
+
+DEFINE_ANE_FUNCTION(initLib) {
+    
+    // empty on iOS
+    return nil;
+}
+
+DEFINE_ANE_FUNCTION(getProductsInfo) {
+    
+    AirInAppPurchase* controller;
+    FREGetContextNativeData(context, (void**)&controller);
+    
+    NSSet* products = freObjectToNSArrayOfNSString(argv[0]);
+    
+    SKProductsRequest* request = [[SKProductsRequest alloc] initWithProductIdentifiers:products];
+    request.delegate = controller;
+    
+    [request start];
     
     return nil;
 }
 
-// make a purchase
-DEFINE_ANE_FUNCTION(makePurchase)
-{
+DEFINE_ANE_FUNCTION(makePurchase) {
     
-    uint32_t stringLength;
-    const uint8_t *string1;
-    //FREDispatchStatusEventAsync(context, (uint8_t*) "DEBUG", (uint8_t*) [@"purchase: getting product id" UTF8String]);
-
-    if (FREGetObjectAsUTF8(argv[0], &stringLength, &string1) != FRE_OK)
-    {
-        return nil;
-    }
-
-    //FREDispatchStatusEventAsync(context, (uint8_t*) "DEBUG", (uint8_t*) [@"purchase: convert product id" UTF8String]);
-
-    NSString *productIdentifier = [NSString stringWithUTF8String:(char*)string1];
-  
-    FREDispatchStatusEventAsync(context, (uint8_t*) "DEBUG", (uint8_t*) [productIdentifier UTF8String]);
+    NSString* productId = freObjectToNSString(argv[0]);
     
-    SKPayment* payment = [SKPayment paymentWithProductIdentifier:productIdentifier];
-        
-    FREDispatchStatusEventAsync(context, (uint8_t*) "DEBUG", (uint8_t*) [[payment productIdentifier] UTF8String]);
-    
- //   [[SKPaymentQueue defaultQueue] removeTransactionObserver:self];
-    
-    
+    SKPayment* payment = [SKPayment paymentWithProductIdentifier:productId];
     [[SKPaymentQueue defaultQueue] addPayment:payment];
     
     return nil;
 }
 
-
-// check if the user can make a purchase
-DEFINE_ANE_FUNCTION(userCanMakeAPurchase)
-{
+DEFINE_ANE_FUNCTION(removePurchaseFromQueue) {
     
-    BOOL canMakePayment = [SKPaymentQueue canMakePayments];
+    NSString* productId = freObjectToNSString(argv[0]);
     
-    if (canMakePayment)
-    {
-        FREDispatchStatusEventAsync(context, (uint8_t*) "PURCHASE_ENABLED", (uint8_t*) [@"Yes" UTF8String]);
- 
-    } else
-    {
-        FREDispatchStatusEventAsync(context, (uint8_t*) "PURCHASE_DISABLED", (uint8_t*) [@"No" UTF8String]);
-    }
-    return nil;
-}
-
-
-
-// make a SKProductsRequest. wait for a SKProductsResponse
-// arg : array of string (string = product identifier)
-DEFINE_ANE_FUNCTION(getProductsInfo)
-{        
-    FREObject arr = argv[0]; // array
-    uint32_t arr_len; // array length
-    
-    FREGetArrayLength(arr, &arr_len);
-
-    NSMutableSet* productsIdentifiers = [[NSMutableSet alloc] init];
-     
-    for(int32_t i=arr_len-1; i>=0;i--){
-                
-        // get an element at index
-        FREObject element;
-        FREGetArrayElementAt(arr, i, &element);
+    if (productId == nil) {
         
-        // convert it to NSString
-        uint32_t stringLength;
-        const uint8_t *string;
-        FREGetObjectAsUTF8(element, &stringLength, &string);
-        NSString *productIdentifier = [NSString stringWithUTF8String:(char*)string];
-        
-        [productsIdentifiers addObject:productIdentifier];
+        FREDispatchStatusEventAsync(context, CONSUME_ERROR, (const uint8_t*)"productId is nil");
+        return nil;
     }
     
-    SKProductsRequest* request = [[SKProductsRequest alloc] initWithProductIdentifiers:productsIdentifiers];
-    
-    
-    [(AirInAppPurchase*)AirInAppRefToSelf sendRequest:request AndContext:context];
-    
-    
-    return nil;
-}
-
-// remove purchase from queue.
-DEFINE_ANE_FUNCTION(removePurchaseFromQueue)
-{
-    uint32_t stringLength;
-    const uint8_t *string1;
-    if (FREGetObjectAsUTF8(argv[0], &stringLength, &string1) != FRE_OK)
-    {
-      return nil;
-    }
-    
-    NSString *productIdentifier = [NSString stringWithUTF8String:(char*)string1];
-
-    FREDispatchStatusEventAsync(context, (uint8_t*) "DEBUG", (uint8_t*) [[NSString stringWithFormat:@"removing purchase from queue %@", productIdentifier] UTF8String]);
-
     NSArray* transactions = [[SKPaymentQueue defaultQueue] transactions];
 
-    for (SKPaymentTransaction* transaction in transactions)
-    {
-     //   FREDispatchStatusEventAsync(context, (uint8_t*) "DEBUG", (uint8_t*) [[NSString stringWithFormat:@"%@", [transaction transactionState]] UTF8String]);
-
-        FREDispatchStatusEventAsync(context, (uint8_t*) "DEBUG", (uint8_t*) [[[transaction payment] productIdentifier] UTF8String]);
-
-        switch ([transaction transactionState]) {
-            case SKPaymentTransactionStatePurchased:
-                FREDispatchStatusEventAsync(context, (uint8_t*)"DEBUG", (uint8_t*) [@"SKPaymentTransactionStatePurchased" UTF8String]);
-                break;
-            case SKPaymentTransactionStateFailed:
-                FREDispatchStatusEventAsync(context, (uint8_t*)"DEBUG", (uint8_t*) [@"SKPaymentTransactionStateFailed" UTF8String]);
-                break;
-            case SKPaymentTransactionStatePurchasing:
-                FREDispatchStatusEventAsync(context, (uint8_t*)"DEBUG", (uint8_t*) [@"SKPaymentTransactionStatePurchasing" UTF8String]);
-            case SKPaymentTransactionStateRestored:
-                FREDispatchStatusEventAsync(context, (uint8_t*)"DEBUG", (uint8_t*) [@"SKPaymentTransactionStateRestored" UTF8String]);
-            default:
-                FREDispatchStatusEventAsync(context, (uint8_t*)"DEBUG", (uint8_t*) [@"Unknown Reason" UTF8String]);
-                break;
-        }
-
-        if ([transaction transactionState] == SKPaymentTransactionStatePurchased && [[[transaction payment] productIdentifier] isEqualToString:productIdentifier])
-        {
-            // conclude the transaction
-            [[SKPaymentQueue defaultQueue] finishTransaction:transaction];
-            FREDispatchStatusEventAsync(context, (uint8_t*) "DEBUG", (uint8_t*) [@"Conluding transaction" UTF8String]);
+    for (SKPaymentTransaction* transaction in transactions) {
+        
+        SKPayment* payment = transaction.payment;
+        NSString* transactionProductId = payment.productIdentifier;
+        
+        if ([transactionProductId isEqualToString:productId]) {
+            
+            if (transaction.transactionState != SKPaymentTransactionStatePurchased) {
+                
+                NSString* errMsg = [NSString stringWithFormat:@"transaction state is %ld", (long)transaction.transactionState];
+                FREDispatchStatusEventAsync(context, CONSUME_ERROR, (const uint8_t*)errMsg.UTF8String);
+            }
+            else {
+                
+                [[SKPaymentQueue defaultQueue] finishTransaction:transaction];
+                
+                NSError* error;
+                NSData* jsonData = [NSJSONSerialization dataWithJSONObject:transaction options:0 error:&error];
+                NSString* jsonString = nil;
+                
+                
+                
+                FREDispatchStatusEventAsync(context, CONSUME_SUCCESSFUL, NULL);
+            }
+            
             break;
         }
     }
@@ -384,80 +340,38 @@ DEFINE_ANE_FUNCTION(removePurchaseFromQueue)
     return nil;
 }
 
+#pragma mark - context init
 
-
-
-
-// ContextInitializer()
-//
-// The context initializer is called when the runtime creates the extension context instance.
-void AirInAppContextInitializer(void* extData, const uint8_t* ctxType, FREContext ctx, 
-                             uint32_t* numFunctionsToTest, const FRENamedFunction** functionsToSet) 
-{    
-    // Register the links btwn AS3 and ObjC. (dont forget to modify the nbFuntionsToLink integer if you are adding/removing functions)
-    NSInteger nbFuntionsToLink = 5;
-    *numFunctionsToTest = nbFuntionsToLink;
+void AirInAppPurchaseContextInitializer(void* extData, const uint8_t* ctxType, FREContext ctx, uint32_t* numFunctionsToTest, const FRENamedFunction** functionsToSet) {
     
-    FRENamedFunction* func = (FRENamedFunction*) malloc(sizeof(FRENamedFunction) * nbFuntionsToLink);
+    static FRENamedFunction functions[] = {
+        MAP_FUNCTION(initLib, NULL),
+        MAP_FUNCTION(getProductsInfo, NULL),
+        MAP_FUNCTION(makePurchase, NULL),
+        MAP_FUNCTION(removePurchaseFromQueue, NULL)
+    };
     
-    func[0].name = (const uint8_t*) "initLib";
-    func[0].functionData = NULL;
-    func[0].function = &AirInAppPurchaseInit;
+    *numFunctionsToTest = sizeof(functionsToSet) / sizeof(FRENamedFunction);
+    *functionsToSet = functions;
     
-    func[1].name = (const uint8_t*) "makePurchase";
-    func[1].functionData = NULL;
-    func[1].function = &makePurchase;
-    
-    func[2].name = (const uint8_t*) "userCanMakeAPurchase";
-    func[2].functionData = NULL;
-    func[2].function = &userCanMakeAPurchase;
-    
-    func[3].name = (const uint8_t*) "getProductsInfo";
-    func[3].functionData = NULL;
-    func[3].function = &getProductsInfo;
-
-    func[4].name = (const uint8_t*) "removePurchaseFromQueue";
-    func[4].functionData = NULL;
-    func[4].function = &removePurchaseFromQueue;
-    
-    *functionsToSet = func;
-    
-    AirInAppCtx = ctx;
-
-    if ((AirInAppPurchase*)AirInAppRefToSelf == nil)
-    {
-        AirInAppRefToSelf = [[AirInAppPurchase alloc] init];
-    }
-
+    AirInAppPurchase* controller = [[AirInAppPurchase alloc] initWithContext:ctx];
+    FRESetContextNativeData(ctx, (__bridge void *)(controller));
 }
 
-// ContextFinalizer()
-//
-// Set when the context extension is created.
-
-void AirInAppContextFinalizer(FREContext ctx) { 
-    NSLog(@"Entering ContextFinalizer()");
+void AirInAppPurchaseContextFinalizer(FREContext ctx) {
     
-    NSLog(@"Exiting ContextFinalizer()");	
 }
 
+#pragma mark - ane init
 
-
-// AirInAppInitializer()
-//
-// The extension initializer is called the first time the ActionScript side of the extension
-// calls ExtensionContext.createExtensionContext() for any context.
-
-void AirInAppInitializer(void** extDataToSet, FREContextInitializer* ctxInitializerToSet, FREContextFinalizer* ctxFinalizerToSet ) 
-{
+void AirInAppPurchaseInitializer(void** extDataToSet, FREContextInitializer* ctxInitializerToSet, FREContextFinalizer* ctxFinalizerToSet) {
     
-    NSLog(@"Entering ExtInitializer()");                    
-    
-	*extDataToSet = NULL;
-	*ctxInitializerToSet = &AirInAppContextInitializer; 
-	*ctxFinalizerToSet = &AirInAppContextFinalizer;
-    
-    NSLog(@"Exiting ExtInitializer()"); 
+    *extDataToSet = NULL;
+    *ctxInitializerToSet = &AirInAppPurchaseContextInitializer;
+    *ctxFinalizerToSet = &AirInAppPurchaseContextFinalizer;
 }
 
+void AirInAppPurchaseFinalizer(void *extData) {
+    
+}
 

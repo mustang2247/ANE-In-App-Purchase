@@ -19,19 +19,12 @@
 #import <Foundation/Foundation.h>
 #import <StoreKit/StoreKit.h>
 #import "FlashRuntimeExtensions.h"
-#import "JSONKit.h"
 
 @interface AirInAppPurchase : NSObject <SKPaymentTransactionObserver, SKProductsRequestDelegate>
 
-- (void) sendRequest:(SKRequest*)request AndContext:(FREContext*)ctx;
-- (void) completeTransaction:(SKPaymentTransaction*)transaction;
-- (void) failedTransaction:(SKPaymentTransaction*)transaction;
-- (void) purchasingTransaction:(SKPaymentTransaction*)transaction;
-- (void) restoreTransaction:(SKPaymentTransaction*)transaction;
 @end
 
-FREObject AirInAppPurchaseInit(FREContext context, void* functionData, uint32_t argc, FREObject argv[]);
-FREObject makePurchase(FREContext context, void* functionData, uint32_t argc, FREObject argv[]);
-FREObject userCanMakeAPurchase(FREContext context, void* functionData, uint32_t argc, FREObject argv[]);
-FREObject getProductsInfo(FREContext context, void* functionData, uint32_t argc, FREObject argv[]);
-FREObject removePurchaseFromQueue(FREContext context, void* functionData, uint32_t argc, FREObject argv[]);
+void AirInAppPurchaseContextInitializer(void* extData, const uint8_t* ctxType, FREContext ctx, uint32_t* numFunctionsToTest, const FRENamedFunction** functionsToSet);
+void AirInAppPurchaseContextFinalizer(FREContext ctx);
+void AirInAppPurchaseInitializer(void** extDataToSet, FREContextInitializer* ctxInitializerToSet, FREContextFinalizer* ctxFinalizerToSet);
+void AirInAppPurchaseFinalizer(void *extData);
