@@ -35,7 +35,3 @@ out
 
 .gradle/
 android/build/
-
-android/local\.properties
-
-android/lib/build/
