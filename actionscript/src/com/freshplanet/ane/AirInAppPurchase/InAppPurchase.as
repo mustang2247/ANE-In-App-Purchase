@@ -105,6 +105,17 @@ package com.freshplanet.ane.AirInAppPurchase {
         public function makeSubscription(productId:String):void {
 
             _context.call("makeSubscription", productId);
+
+            /*
+            if (_isAndroid()) {
+
+                trace("[InAppPurchase] check user can make a subscription");
+                _context.call("makeSubscription", productId);
+            }
+            else {
+                _dispatchEvent(InAppPurchaseEvent.PURCHASE_ERROR, "subscriptions not supported");
+            }
+            */
         }
 		
         /**
@@ -157,8 +168,6 @@ package com.freshplanet.ane.AirInAppPurchase {
             }
 
             trace("[InAppPurchase] get Products Info");
-            if(!productsId) productsId = [];
-            if(!subscriptionIds) subscriptionIds = [];
             _context.call("getProductsInfo", productsId, subscriptionIds);
 		}
 
